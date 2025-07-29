@@ -1,0 +1,22 @@
+version: '3'
+
+services:
+  api:
+    build: .
+    ports:
+      - "8080:8080"
+    depends_on:
+      - redis
+    networks:
+      - routy-net
+
+  redis:
+    image: redis:7
+    ports:
+      - "6380:6379"
+    networks:
+      - routy-net
+
+networks:
+  routy-net:
+    driver: bridge

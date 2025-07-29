@@ -1,0 +1,20 @@
+# Git ve mod klasörleri
+.git
+vendor/
+
+# OS ve editor dosyaları
+*.DS_Store
+*.swp
+
+# Build çıktıları
+main
+*.out
+*.exe
+
+# Config ve log dosyaları
+.env
+*.log
+
+# IDE klasörleri
+.vscode/
+.idea/
