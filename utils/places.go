@@ -97,7 +97,7 @@ func GetPlacesNearby(lat, lon float64, interest string, startCoord, endCoord []f
 		return all, nil
 	}
 
-	osmPlaces, err := GetPlacesFromOverpass(lat, lon, interest)
+	osmPlaces, err := GetPlacesFromOverpass(startCoord[0], startCoord[1], endCoord[0], endCoord[1], interest)
 	if err != nil {
 		log.Printf("Overpass error: %v", err)
 	} else {
@@ -108,90 +108,149 @@ func GetPlacesNearby(lat, lon float64, interest string, startCoord, endCoord []f
 }
 
 // Makes Overpass API call or returns from Redis cache if available
-func GetPlacesFromOverpass(lat, lon float64, interest string) ([]models.Place, error) {
-	tag := mapInterestToOverpassTag(interest)
-	cacheKey := fmt.Sprintf("overpass:%s:%.4f:%.4f", interest, lat, lon)
+func GetPlacesFromOverpass(lat1, lon1, lat2, lon2 float64, interest string) ([]models.Place, error) {
+	fmt.Printf("[DEBUG] GetPlacesFromOverpass called with lat1=%.6f, lon1=%.6f, lat2=%.6f, lon2=%.6f, interest=%s\n",
+		lat1, lon1, lat2, lon2, interest)
 
-	// Check Redis cache
-	cached, err := RedisClient.Get(Ctx, cacheKey).Result()
-	if err == nil {
-		fmt.Println("Data retrieved from Redis.")
+	tag := mapInterestToOverpassTag(interest)
+	cacheKey := fmt.Sprintf("overpass:route:%s:%.4f,%.4f:%.4f,%.4f", interest, lat1, lon1, lat2, lon2)
+
+	// Redis kontrol
+	if cached, err := RedisClient.Get(Ctx, cacheKey).Result(); err == nil {
+		fmt.Println("[DEBUG] Data retrieved from Redis.")
 		var results []models.Place
-		if err := json.Unmarshal([]byte(cached), &results); err == nil {
+		if json.Unmarshal([]byte(cached), &results) == nil {
 			return results, nil
 		}
-	} else {
-		fmt.Println("No data in Redis, querying Overpass API...")
 	}
 
-	// Overpass API call
-	query := fmt.Sprintf(`
-		[out:json][timeout:25];
-		(
-		  node[%s](around:300,%.6f,%.6f);
-		  way[%s](around:300,%.6f,%.6f);
-		  relation[%s](around:300,%.6f,%.6f);
-		);
-		out center;
-	`, tag, lat, lon, tag, lat, lon, tag, lat, lon)
+	fmt.Println("[DEBUG] No data in Redis, querying OSRM & Overpass API...")
 
-	resp, err := http.Post("https://overpass-api.de/api/interpreter", "application/x-www-form-urlencoded",
-		strings.NewReader("data="+url.QueryEscape(query)))
+	// OSRM'den rota noktalarını al
+	osrmURL := fmt.Sprintf("http://router.project-osrm.org/route/v1/driving/%.6f,%.6f;%.6f,%.6f?overview=full&geometries=geojson", lon1, lat1, lon2, lat2)
+	resp, err := http.Get(osrmURL)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 
-	fmt.Println("Data retrieved from Overpass API.")
-
-	body, _ := io.ReadAll(resp.Body)
-	var data struct {
-		Elements []struct {
-			Type   string            `json:"type"`
-			Lat    float64           `json:"lat"`
-			Lon    float64           `json:"lon"`
-			ID     int64             `json:"id"`
-			Tags   map[string]string `json:"tags"`
-			Center struct {
-				Lat float64 `json:"lat"`
-				Lon float64 `json:"lon"`
-			} `json:"center"`
-		} `json:"elements"`
+	var osrmData struct {
+		Routes []struct {
+			Geometry struct {
+				Coordinates [][]float64 `json:"coordinates"`
+			} `json:"geometry"`
+		} `json:"routes"`
 	}
-	if err := json.Unmarshal(body, &data); err != nil {
+	if err := json.NewDecoder(resp.Body).Decode(&osrmData); err != nil {
 		return nil, err
 	}
 
+	if len(osrmData.Routes) == 0 {
+		return nil, fmt.Errorf("no route found")
+	}
+
+	coords := osrmData.Routes[0].Geometry.Coordinates
+
+	// Her 500 metre aralıkla nokta seç
+	var selectedPoints [][2]float64
+	lastPoint := coords[0]
+	selectedPoints = append(selectedPoints, [2]float64{lastPoint[1], lastPoint[0]}) // lat, lon
+	const intervalMeters = 500
+
+	for _, pt := range coords {
+		if haversineDistance(lastPoint[1], lastPoint[0], pt[1], pt[0]) >= intervalMeters {
+			selectedPoints = append(selectedPoints, [2]float64{pt[1], pt[0]})
+			lastPoint = pt
+		}
+	}
+
+	// Nokta sayısını sınırlayalım
+	if len(selectedPoints) > 10 {
+		selectedPoints = selectedPoints[:10]
+	}
+	fmt.Printf("[DEBUG] Selected %d points along the route for Overpass queries\n", len(selectedPoints))
+
+	// Overpass sorguları
 	var results []models.Place
-	for _, el := range data.Elements {
-		lat := el.Lat
-		lon := el.Lon
-		if el.Type != "node" {
-			lat = el.Center.Lat
-			lon = el.Center.Lon
+	seen := make(map[int64]bool)
+
+	for _, p := range selectedPoints {
+		lat, lon := p[0], p[1]
+		fmt.Printf("[DEBUG] Sending Overpass query for point (%.6f, %.6f) and tag=%s\n", lat, lon, tag)
+
+		query := fmt.Sprintf(`
+			[out:json][timeout:25];
+			(
+			  node[%s](around:300,%.6f,%.6f);
+			  way[%s](around:300,%.6f,%.6f);
+			  relation[%s](around:300,%.6f,%.6f);
+			);
+			out center;
+		`, tag, lat, lon, tag, lat, lon, tag, lat, lon)
+
+		resp, err := http.Post("https://overpass-api.de/api/interpreter", "application/x-www-form-urlencoded",
+			strings.NewReader("data="+url.QueryEscape(query)))
+		if err != nil {
+			fmt.Println("[WARN] Overpass error:", err)
+			continue
 		}
-		name := el.Tags["name"]
-		if name == "" {
-			name = "Bilinmeyen"
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+
+		var data struct {
+			Elements []struct {
+				Type   string            `json:"type"`
+				Lat    float64           `json:"lat"`
+				Lon    float64           `json:"lon"`
+				ID     int64             `json:"id"`
+				Tags   map[string]string `json:"tags"`
+				Center struct {
+					Lat float64 `json:"lat"`
+					Lon float64 `json:"lon"`
+				} `json:"center"`
+			} `json:"elements"`
 		}
-		results = append(results, models.Place{
-			Name:      name,
-			Latitude:  lat,
-			Longitude: lon,
-			Category:  interest,
-		})
+		if err := json.Unmarshal(body, &data); err != nil {
+			fmt.Println("[WARN] JSON unmarshal error:", err)
+			continue
+		}
+
+		fmt.Printf("[DEBUG] Overpass returned %d elements for point (%.6f, %.6f)\n", len(data.Elements), lat, lon)
+
+		for _, el := range data.Elements {
+			if seen[el.ID] {
+				continue
+			}
+			seen[el.ID] = true
+
+			plLat, plLon := el.Lat, el.Lon
+			if el.Type != "node" {
+				plLat = el.Center.Lat
+				plLon = el.Center.Lon
+			}
+			name := el.Tags["name"]
+			if name == "" {
+				name = "Bilinmeyen"
+			}
+			results = append(results, models.Place{
+				Name:      name,
+				Latitude:  plLat,
+				Longitude: plLon,
+				Category:  interest,
+			})
+		}
 	}
 
-	jsonData, err := json.Marshal(results)
-	if err == nil {
+	// Redis'e kaydet
+	if jsonData, err := json.Marshal(results); err == nil {
 		RedisClient.Set(Ctx, cacheKey, jsonData, 6*time.Hour)
-	} else {
-		fmt.Println("Failed to marshal data for Redis:", err)
 	}
 
+	fmt.Printf("[DEBUG] Returning %d places\n", len(results))
 	return results, nil
 }
 
+// Maps user interest keywords to Overpass tags
 func mapInterestToOverpassTag(interest string) string {
 	switch interest {
 	case "kafe":
@@ -212,6 +271,8 @@ func mapInterestToOverpassTag(interest string) string {
 		return "amenity=restaurant"
 	}
 }
+
+// Filters only places that are within 5 km of the current user location
 func GetPlacesBetweenWithCurrentLocation(startLat, startLon, endLat, endLon, currentLat, currentLon float64, interests []string) ([]models.Place, error) {
 	// First, get the standard route places
 	places, err := GetPlacesBetween(startLat, startLon, endLat, endLon, interests)
