@@ -8,10 +8,13 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"os"
 	"routy/models"
 	"strings"
 	"time"
 )
+
+var isDebug = os.Getenv("APP_ENV") != "production"
 
 // Represents the route geometry structure returned by OSRM
 type RouteGeometry struct {
@@ -109,8 +112,10 @@ func GetPlacesNearby(lat, lon float64, interest string, startCoord, endCoord []f
 
 // Makes Overpass API call or returns from Redis cache if available
 func GetPlacesFromOverpass(lat1, lon1, lat2, lon2 float64, interest string) ([]models.Place, error) {
-	fmt.Printf("[DEBUG] GetPlacesFromOverpass called with lat1=%.6f, lon1=%.6f, lat2=%.6f, lon2=%.6f, interest=%s\n",
-		lat1, lon1, lat2, lon2, interest)
+	if isDebug {
+		fmt.Printf("[DEBUG] GetPlacesFromOverpass called with lat1=%.6f, lon1=%.6f, lat2=%.6f, lon2=%.6f, interest=%s\n",
+			lat1, lon1, lat2, lon2, interest)
+	}
 
 	tag := mapInterestToOverpassTag(interest)
 	cacheKey := fmt.Sprintf("overpass:route:%s:%.4f,%.4f:%.4f,%.4f", interest, lat1, lon1, lat2, lon2)
@@ -123,9 +128,9 @@ func GetPlacesFromOverpass(lat1, lon1, lat2, lon2 float64, interest string) ([]m
 			return results, nil
 		}
 	}
-
-	fmt.Println("[DEBUG] No data in Redis, querying OSRM & Overpass API...")
-
+	if isDebug {
+		fmt.Println("[DEBUG] No data in Redis, querying OSRM & Overpass API...")
+	}
 	// OSRM'den rota noktalarını al
 	osrmURL := fmt.Sprintf("http://router.project-osrm.org/route/v1/driving/%.6f,%.6f;%.6f,%.6f?overview=full&geometries=geojson", lon1, lat1, lon2, lat2)
 	resp, err := http.Get(osrmURL)
@@ -176,8 +181,9 @@ func GetPlacesFromOverpass(lat1, lon1, lat2, lon2 float64, interest string) ([]m
 
 	for _, p := range selectedPoints {
 		lat, lon := p[0], p[1]
-		fmt.Printf("[DEBUG] Sending Overpass query for point (%.6f, %.6f) and tag=%s\n", lat, lon, tag)
-
+		if isDebug {
+			fmt.Printf("[DEBUG] Sending Overpass query for point (%.6f, %.6f) and tag=%s\n", lat, lon, tag)
+		}
 		query := fmt.Sprintf(`
 			[out:json][timeout:25];
 			(
@@ -214,9 +220,9 @@ func GetPlacesFromOverpass(lat1, lon1, lat2, lon2 float64, interest string) ([]m
 			fmt.Println("[WARN] JSON unmarshal error:", err)
 			continue
 		}
-
-		fmt.Printf("[DEBUG] Overpass returned %d elements for point (%.6f, %.6f)\n", len(data.Elements), lat, lon)
-
+		if isDebug {
+			fmt.Printf("[DEBUG] Overpass returned %d elements for point (%.6f, %.6f)\n", len(data.Elements), lat, lon)
+		}
 		for _, el := range data.Elements {
 			if seen[el.ID] {
 				continue
@@ -245,8 +251,9 @@ func GetPlacesFromOverpass(lat1, lon1, lat2, lon2 float64, interest string) ([]m
 	if jsonData, err := json.Marshal(results); err == nil {
 		RedisClient.Set(Ctx, cacheKey, jsonData, 6*time.Hour)
 	}
-
-	fmt.Printf("[DEBUG] Returning %d places\n", len(results))
+	if isDebug {
+		fmt.Printf("[DEBUG] Returning %d places\n", len(results))
+	}
 	return results, nil
 }
 
