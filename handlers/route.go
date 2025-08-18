@@ -41,7 +41,8 @@ func HandleRoute(c *gin.Context) {
 	}
 
 	// Fetch relevant places along the route
-	places, err := utils.GetPlacesBetween(startLat, startLon, endLat, endLon, req.Interests)
+	// Fetch relevant places along the route
+	places, err := utils.GetPlacesFromOverpassParallel(startLat, startLon, req.Interests)
 	if err != nil {
 		log.Println("Failed to get places:", err)
 		places = []models.Place{}

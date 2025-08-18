@@ -55,28 +55,24 @@ func GetPlacesBetween(startLat, startLon, endLat, endLon float64, interests []st
 		step = 1
 	}
 
-	startCoord := []float64{startLat, startLon}
-	endCoord := []float64{endLat, endLon}
-
 	for i := 0; i < len(coordinates); i += step {
 		lon := coordinates[i][0]
 		lat := coordinates[i][1]
 
-		for _, interest := range interests {
-			places, err := GetPlacesNearby(lat, lon, interest, startCoord, endCoord)
-			if err != nil {
-				log.Println("Error:", err)
-				continue
-			}
+		places, err := GetPlacesFromOverpassParallel(lat, lon, interests)
+		if err != nil {
+			log.Println("Error:", err)
+			continue
+		}
 
-			for _, p := range places {
-				key := fmt.Sprintf("%s_%f_%f", p.Name, p.Latitude, p.Longitude)
-				if !placeSet[key] {
-					placeSet[key] = true
-					allPlaces = append(allPlaces, p)
-				}
+		for _, p := range places {
+			key := fmt.Sprintf("%s_%f_%f", p.Name, p.Latitude, p.Longitude)
+			if !placeSet[key] {
+				placeSet[key] = true
+				allPlaces = append(allPlaces, p)
 			}
 		}
+
 	}
 
 	filteredPlaces := FilterStopsByDistance(coordinates, allPlaces, 3000)
@@ -84,30 +80,6 @@ func GetPlacesBetween(startLat, startLon, endLat, endLon float64, interests []st
 		filteredPlaces = filteredPlaces[:15]
 	}
 	return filteredPlaces, nil
-}
-
-// Fetches places near a specific coordinate, only within allowed route bounds
-func GetPlacesNearby(lat, lon float64, interest string, startCoord, endCoord []float64) ([]models.Place, error) {
-	var all []models.Place
-
-	minLat := math.Min(startCoord[0], endCoord[0]) - 0.1
-	maxLat := math.Max(startCoord[0], endCoord[0]) + 0.1
-	minLon := math.Min(startCoord[1], endCoord[1]) - 0.1
-	maxLon := math.Max(startCoord[1], endCoord[1]) + 0.1
-	// Check if point is within bounding box of the route
-	if lat < minLat || lat > maxLat || lon < minLon || lon > maxLon {
-		log.Printf("Coordinate out of route bounds: lat=%f, lon=%f", lat, lon)
-		return all, nil
-	}
-
-	osmPlaces, err := GetPlacesFromOverpass(startCoord[0], startCoord[1], endCoord[0], endCoord[1], interest)
-	if err != nil {
-		log.Printf("Overpass error: %v", err)
-	} else {
-		all = append(all, osmPlaces...)
-	}
-
-	return all, nil
 }
 
 // Makes Overpass API call or returns from Redis cache if available
