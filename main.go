@@ -17,6 +17,9 @@ func main() {
 			"message": "pong",
 		})
 	})
+	router.GET("/", func(c *gin.Context) {
+		c.JSON(200, gin.H{"message": "Routy API is live!"})
+	})
 
 	router.GET("/route", func(c *gin.Context) {
 		from := c.Query("from")
