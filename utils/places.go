@@ -135,7 +135,7 @@ func GetPlacesFromOverpass(lat1, lon1, lat2, lon2 float64, interest string) ([]m
 	const intervalMeters = 500
 
 	for _, pt := range coords {
-		if haversineDistance(lastPoint[1], lastPoint[0], pt[1], pt[0]) >= intervalMeters {
+		if HaversineDistance(lastPoint[1], lastPoint[0], pt[1], pt[0]) >= intervalMeters {
 			selectedPoints = append(selectedPoints, [2]float64{pt[1], pt[0]})
 			lastPoint = pt
 		}

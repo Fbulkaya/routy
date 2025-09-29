@@ -5,7 +5,7 @@ import (
 )
 
 func haversineDistance(lat1, lon1, lat2, lon2 float64) float64 {
-	const R = 6371000 // Dünya yarıçapı metre
+	const R = 6371000 
 	lat1Rad := lat1 * math.Pi / 180
 	lat2Rad := lat2 * math.Pi / 180
 	dLat := (lat2 - lat1) * math.Pi / 180

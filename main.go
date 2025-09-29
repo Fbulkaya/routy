@@ -18,6 +18,24 @@ func main() {
 		})
 	})
 
+	router.GET("/route", func(c *gin.Context) {
+		from := c.Query("from")
+		to := c.Query("to")
+		categories := c.QueryArray("category") // hem tek hem çoklu destek
+
+		if from == "" || to == "" {
+			c.JSON(400, gin.H{"error": "from and to are required"})
+			return
+		}
+
+		res, err := handlers.GetRouteData(from, to, categories)
+		if err != nil {
+			c.JSON(500, gin.H{"error": err.Error()})
+			return
+		}
+
+		c.JSON(200, res)
+	})
 	router.POST("/route", handlers.HandleRoute)
 	router.POST("/route_with_current", handlers.HandleRouteWithCurrent)
 

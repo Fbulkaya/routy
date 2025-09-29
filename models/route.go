@@ -3,7 +3,7 @@ package models
 type RouteRequest struct {
 	Start     string   `json:"start"`
 	End       string   `json:"end"`
-	Interests []string `json:"interests"` // Burayı []string yaptık
+	Interests []string `json:"interests"` 
 }
 
 type RouteResponse struct {

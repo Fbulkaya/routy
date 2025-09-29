@@ -13,8 +13,8 @@ var (
 
 func InitRedis() {
 	RedisClient = redis.NewClient(&redis.Options{
-		Addr:     "redis:6379", // Redis varsayılan portu
-		Password: "",           // Parolanız varsa buraya yazın
+		Addr:     "redis:6379", 
+		Password: "",           
 		DB:       0,
 	})
 }
